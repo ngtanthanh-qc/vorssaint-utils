@@ -27,7 +27,24 @@ final class UpdateService: ObservableObject {
     /// preview. Set alongside `.available`; cleared otherwise.
     @Published private(set) var availableNotes: String?
 
-    private let repository = "vorssaint/vorssaint-utils"
+    private let defaultRepository = "vorssaint/vorssaint-utils"
+    private var repository: String {
+        if let custom = Bundle.main.object(forInfoDictionaryKey: "VorssaintUpdateRepository") as? String,
+           !custom.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return custom.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return defaultRepository
+    }
+    /// On Intel (x86_64), the upstream `vorssaint/vorssaint-utils` repository
+    /// only publishes arm64 DMGs. Skip upstream auto-updates on x86_64 unless
+    /// `VorssaintUpdateRepository` in Info.plist points to a fork.
+    private var isUnsupportedUpstreamArchitecture: Bool {
+        #if arch(x86_64)
+        return repository == defaultRepository
+        #else
+        return false
+        #endif
+    }
     private var downloadURL: URL?
     /// Size the release advertises for the asset, used to bound the download.
     private var downloadExpectedBytes: Int64?
@@ -67,8 +84,8 @@ final class UpdateService: ObservableObject {
         }
         // The local dev build never auto-updates, but can simulate the
         // "update available" UI via the `simulateUpdate` default, for testing.
-        if AppInfo.isDeveloperBuild {
-            if UserDefaults.standard.bool(forKey: DefaultsKey.simulateUpdate) {
+        if AppInfo.isDeveloperBuild || isUnsupportedUpstreamArchitecture {
+            if AppInfo.isDeveloperBuild && UserDefaults.standard.bool(forKey: DefaultsKey.simulateUpdate) {
                 let simulatedVersion = AppInfo.isBeta ? "9.9.9-beta.1" : "9.9.9"
                 state = .available(version: simulatedVersion)
                 availableNotes = ReleaseNotes.rawNotes(for: AppInfo.version)
@@ -100,10 +117,10 @@ final class UpdateService: ObservableObject {
     // MARK: - Check
 
     func check(manual: Bool) {
-        if AppInfo.isDeveloperBuild {
+        if AppInfo.isDeveloperBuild || isUnsupportedUpstreamArchitecture {
             // No real update target; reflect the simulation default so the
             // notification UI can be exercised locally.
-            if UserDefaults.standard.bool(forKey: DefaultsKey.simulateUpdate) {
+            if AppInfo.isDeveloperBuild && UserDefaults.standard.bool(forKey: DefaultsKey.simulateUpdate) {
                 state = .available(version: "9.9.9")
                 availableNotes = ReleaseNotes.rawNotes(for: AppInfo.version)
             } else {
@@ -193,7 +210,7 @@ final class UpdateService: ObservableObject {
     /// or the panel opens, so a new release surfaces promptly without hammering the
     /// API. The hourly timer is the floor; this makes it feel immediate.
     func checkIfStale(maxAge: TimeInterval = 15 * 60) {
-        if AppInfo.isDeveloperBuild { return }
+        if AppInfo.isDeveloperBuild || isUnsupportedUpstreamArchitecture { return }
         guard autoCheckEnabled else { return }
         switch state {
         case .checking, .downloading, .installing: return
@@ -206,7 +223,7 @@ final class UpdateService: ObservableObject {
     // MARK: - Download & install
 
     func downloadAndInstall() {
-        if AppInfo.isDeveloperBuild { return }  // never replace the local dev build over itself
+        if AppInfo.isDeveloperBuild || isUnsupportedUpstreamArchitecture { return }  // never replace the local dev build over itself
         guard let downloadURL else { return }
         // Pre-flight BEFORE spending the download: a translocated app or one
         // running from a read-only volume (the mounted DMG) can never be

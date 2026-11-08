@@ -74,6 +74,17 @@ enum TemperatureSensorSelector {
         "Tp0m", "Tp0p", "Tp0u", "Tp0y",
     ]
 
+    // Intel Macs expose CPU die/proximity/peci sensors under TC.. / Tc.. keys
+    // and GPU die/proximity sensors under TG.. / Tg.. keys.
+    private static let intelPreferredCPUKeys: Set<String> = [
+        "TC0E", "TC0F", "TC0D", "TC0P", "TC0H", "TC1C", "TC2C", "TC3C", "TC4C",
+        "TC5C", "TC6C", "TC7C", "TC8C", "TCGC", "TCSA", "TCXC", "Tc0c", "Tc1c",
+    ]
+
+    static func isGPUTemperatureKey(_ key: String) -> Bool {
+        key.hasPrefix("Tg") || key.hasPrefix("TG")
+    }
+
     static func platform(brandString: String?) -> CPUTemperaturePlatform {
         let brand = brandString?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         // Preserve the established Tp/Te reading path for this supported chip
@@ -173,14 +184,17 @@ enum TemperatureSensorSelector {
             return appleM4ProMaxCPUCoreKeys.contains(key)
         case .appleM5Family:
             return appleM5CPUCoreKeys.contains(key)
-        case .unmappedAppleSilicon, .generic:
+        case .unmappedAppleSilicon:
             return false
+        case .generic:
+            return intelPreferredCPUKeys.contains(key)
         }
     }
 
     static func isCPUTemperatureKey(_ key: String,
                                     platform: CPUTemperaturePlatform) -> Bool {
         if key.hasPrefix("Tp") || key.hasPrefix("Te") { return true }
+        if platform == .generic && (key.hasPrefix("TC") || key.hasPrefix("Tc")) { return true }
         return platform == .appleM3Family && key.hasPrefix("Tf")
     }
 

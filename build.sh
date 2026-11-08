@@ -62,7 +62,12 @@ FAN_HELPER_ID="$APP_BUNDLE_ID.fan-control"
 # Sources/NowPlayingAdapter. Staged under Contents/Frameworks, signed on its own.
 NOW_PLAYING_ADAPTER_ID="$APP_BUNDLE_ID.now-playing"
 NOW_PLAYING_ADAPTER="libVorssaintNowPlaying.dylib"
-TARGET="arm64-apple-macosx14.0"
+HOST_ARCH="${VORSSAINT_ARCH:-$(uname -m)}"
+case "$HOST_ARCH" in
+    arm64|x86_64) ;;
+    *) HOST_ARCH="x86_64" ;;
+esac
+TARGET="${HOST_ARCH}-apple-macosx14.0"
 ENTITLEMENTS="Resources/Vorssaint.entitlements"
 LEGACY_IDENTITY="Vorssaint Utils Signing"
 
@@ -210,6 +215,9 @@ HID_EVENT_SYSTEM_FLAGS=(-I Sources/HIDEventSystem)
 if [[ "$SDK" == "$PINNED_SDK" ]]; then
     # Swift 6.4 can read the SDK 26 interfaces when given their compiler version.
     SDK_COMPAT_FLAGS=(-Xfrontend -interface-compiler-version -Xfrontend 6.3.2)
+fi
+if [[ -n "${VORSSAINT_MODULE_CACHE:-}" ]]; then
+    SDK_COMPAT_FLAGS+=(-module-cache-path "$VORSSAINT_MODULE_CACHE")
 fi
 
 # The defaults migrations under test need a real UserDefaults suite, and every
@@ -638,7 +646,9 @@ swiftc -O -target "$TARGET" -sdk "$SDK" "${SDK_COMPAT_FLAGS[@]}" "${BUILD_VARIAN
     Sources/Vorssaint/Services/FanControl/FanControlHardware.swift \
     Sources/FanControlHelper/main.swift \
     -o "build/$FAN_HELPER_ID"
-"build/$FAN_HELPER_ID" --selftest
+if [[ "$HOST_ARCH" == "$(uname -m)" ]] || [[ "$(uname -m)" == "arm64" && "$HOST_ARCH" == "x86_64" ]]; then
+    "build/$FAN_HELPER_ID" --selftest
+fi
 
 echo "▸ Compiling Now Playing adapter…"
 swiftc -O -target "$TARGET" -sdk "$SDK" "${SDK_COMPAT_FLAGS[@]}" -emit-library \
@@ -651,7 +661,7 @@ swiftc -O -target "$TARGET" -sdk "$SDK" "${SDK_COMPAT_FLAGS[@]}" -emit-library \
     -o "build/$NOW_PLAYING_ADAPTER"
 
 echo "▸ Generating app icon…"
-swift Tools/MakeIcon.swift build/AppIcon.iconset
+swift -sdk "$SDK" "${SDK_COMPAT_FLAGS[@]}" Tools/MakeIcon.swift build/AppIcon.iconset
 xattr -c -r build/AppIcon.iconset build/AppIcon.icns build/MenuBarIcon.png build/MenuBarIcon@2x.png build/BrandMark.png 2>/dev/null || true
 ACTOOL_BIN="$(xcrun --find actool 2>/dev/null || true)"
 ICON_TMP="$(mktemp -d)"

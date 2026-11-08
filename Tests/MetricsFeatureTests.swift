@@ -1033,6 +1033,16 @@ enum MetricsFeatureTests {
             platform: .generic
         )
         suite.expectClose(genericCPU ?? -1, 51.6, "generic CPU sensor selection preserves previous hottest behavior")
+        let intelCPU = TemperatureSensorSelector.displayedCPUTemperature(
+            readings: [("TC0P", 52.25), ("TC1C", 71.0), ("TC2C", 78.0), ("TC0T", 1.5)],
+            platform: .generic
+        )
+        suite.expect(TemperatureSensorSelector.isCPUTemperatureKey("TC1C", platform: .generic)
+                && TemperatureSensorSelector.isCPUCoreKey("TC1C", platform: .generic)
+                && TemperatureSensorSelector.isGPUTemperatureKey("TG0P")
+                && TemperatureSensorSelector.isGPUTemperatureKey("Tg0D"),
+               "generic platform discovers Intel TC CPU and TG GPU sensors")
+        suite.expectClose(intelCPU ?? -1, 78.0, "Intel CPU sensor selection picks hottest core/die reading")
 
         // MARK: Hot CPU alert
 

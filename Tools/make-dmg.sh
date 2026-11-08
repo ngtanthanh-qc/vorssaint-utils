@@ -37,7 +37,15 @@ VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/C
 OUT="dist/Vorssaint-$VERSION.dmg"
 
 echo "▸ Rendering installer background…"
-swift Tools/MakeDMGBackground.swift build/dmg-background.png
+PINNED_SDK="/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk"
+SDK_FLAGS=()
+if [[ -z "${DEVELOPER_DIR:-}" && -d "$PINNED_SDK" ]]; then
+    SDK_FLAGS=(-sdk "$PINNED_SDK" -Xfrontend -interface-compiler-version -Xfrontend 6.3.2)
+fi
+if [[ -n "${VORSSAINT_MODULE_CACHE:-}" ]]; then
+    SDK_FLAGS+=(-module-cache-path "$VORSSAINT_MODULE_CACHE")
+fi
+swift "${SDK_FLAGS[@]}" Tools/MakeDMGBackground.swift build/dmg-background.png
 
 echo "▸ Staging DMG contents…"
 STAGING="$(mktemp -d)"
