@@ -8,7 +8,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-APP_NAME="Vorssaint"
+APP_NAME="VorsIntel"
 APP="build/stage/$APP_NAME.app"
 VOLUME="$APP_NAME"
 STAGING=""
@@ -34,7 +34,7 @@ xattr -cr "$APP"
 codesign --verify --deep --strict "$APP"
 
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Contents/Info.plist")"
-OUT="dist/Vorssaint-$VERSION.dmg"
+OUT="dist/$APP_NAME-$VERSION.dmg"
 
 echo "▸ Rendering installer background…"
 PINNED_SDK="/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk"

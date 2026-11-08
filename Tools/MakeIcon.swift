@@ -1,15 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Vorssaint
 
-// Generates all icon assets:
-// - the app iconset and .icns from the exported Default rendition of the
-//   adaptive source (Resources/Brand/AppIcon-Default.png)
-// - the menu bar template glyph and BrandMark from the wordmark master
-//   (Resources/Brand/logo.png)
-// AppIcon-Default.png is a hand-exported twin of Resources/Brand/AppIcon.icon;
-// re-export it whenever the Icon Composer project changes. The build cannot read
-// .icon bundles directly: actool exists only inside full Xcode 26, and the
-// supported local floor is Command Line Tools alone.
+// Generates all icon assets for the unofficial Intel fork (VorsIntel):
+// - the app iconset and .icns with a distinct processor/telemetry design
+// - the menu bar template glyph and BrandMark
+// Distinct from official Vorssaint branding in compliance with TRADEMARKS.md.
 import AppKit
 
 // Current macOS misreads PNG payloads in the legacy small chunks. It downsamples
@@ -23,48 +18,6 @@ let iconSizes: [(name: String, px: Int, icnsType: String?)] = [
 ]
 
 let outDir = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "AppIcon.iconset"
-let scriptDir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent()
-let projectDir = scriptDir.deletingLastPathComponent()
-let logoPath = projectDir.appendingPathComponent("Resources/Brand/logo.png").path
-
-guard let logo = NSImage(contentsOfFile: logoPath),
-      let logoTIFF = logo.tiffRepresentation,
-      let logoRep = NSBitmapImageRep(data: logoTIFF)
-else {
-    print("could not load \(logoPath)")
-    exit(1)
-}
-
-let appIconPath = projectDir.appendingPathComponent("Resources/Brand/AppIcon-Default.png").path
-guard let appIconMaster = NSImage(contentsOfFile: appIconPath) else {
-    print("could not load \(appIconPath)")
-    exit(1)
-}
-
-/// Bounding box of visible (non-transparent) pixels, so the mark can be
-/// centered optically regardless of padding in the source file.
-func contentBounds(of rep: NSBitmapImageRep) -> CGRect {
-    var minX = rep.pixelsWide, minY = rep.pixelsHigh, maxX = 0, maxY = 0
-    for y in 0..<rep.pixelsHigh {
-        for x in 0..<rep.pixelsWide {
-            if let color = rep.colorAt(x: x, y: y), color.alphaComponent > 0.05 {
-                minX = min(minX, x); maxX = max(maxX, x)
-                minY = min(minY, y); maxY = max(maxY, y)
-            }
-        }
-    }
-    guard maxX > minX, maxY > minY else {
-        return CGRect(x: 0, y: 0, width: rep.pixelsWide, height: rep.pixelsHigh)
-    }
-    return CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
-}
-
-let bounds = contentBounds(of: logoRep)
-// NSImage draws bottom-up while colorAt() is top-down — flip Y for drawing.
-let sourceRect = CGRect(x: bounds.minX,
-                        y: CGFloat(logoRep.pixelsHigh) - bounds.maxY,
-                        width: bounds.width,
-                        height: bounds.height)
 
 func bitmapCanvas(_ px: Int, _ py: Int) -> NSBitmapImageRep? {
     NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: px, pixelsHigh: py,
@@ -73,15 +26,54 @@ func bitmapCanvas(_ px: Int, _ py: Int) -> NSBitmapImageRep? {
                      bytesPerRow: 0, bitsPerPixel: 0)
 }
 
-/// Draws the trimmed mark fitted into `target`, preserving aspect ratio.
-func drawMark(into target: CGRect) {
-    let scale = min(target.width / sourceRect.width, target.height / sourceRect.height)
-    let size = CGSize(width: sourceRect.width * scale, height: sourceRect.height * scale)
-    let rect = CGRect(x: target.midX - size.width / 2,
-                      y: target.midY - size.height / 2,
-                      width: size.width, height: size.height)
-    logo.draw(in: rect, from: sourceRect, operation: .sourceOver, fraction: 1,
-              respectFlipped: false, hints: [.interpolation: NSImageInterpolation.high.rawValue])
+/// Draws the fork's distinct CPU/telemetry mark inside `target`, keeping clear
+/// margins from the canvas edges so `SelfTest` never sees clipped ink.
+func drawMark(into target: CGRect, color: NSColor = .black) {
+    let side = min(target.width, target.height) * 0.68
+    let center = CGPoint(x: target.midX, y: target.midY)
+    let bodyRect = CGRect(x: center.x - side / 2,
+                          y: center.y - side / 2,
+                          width: side,
+                          height: side)
+    let stroke = max(1.2, side * 0.11)
+    color.setStroke()
+    color.setFill()
+
+    // Outer CPU package frame
+    let corner = side * 0.22
+    let framePath = NSBezierPath(roundedRect: bodyRect, xRadius: corner, yRadius: corner)
+    framePath.lineWidth = stroke
+    framePath.stroke()
+
+    // Inner silicon die
+    let dieSide = side * 0.42
+    let dieRect = CGRect(x: center.x - dieSide / 2,
+                         y: center.y - dieSide / 2,
+                         width: dieSide,
+                         height: dieSide)
+    let diePath = NSBezierPath(roundedRect: dieRect, xRadius: dieSide * 0.18, yRadius: dieSide * 0.18)
+    diePath.fill()
+
+    // Processor pins on each side
+    let pinLength = side * 0.16
+    let offsets: [CGFloat] = [-0.22, 0.22]
+    for offset in offsets {
+        let delta = side * offset
+        let pins = NSBezierPath()
+        pins.lineWidth = stroke * 0.85
+        pins.lineCapStyle = .round
+        // Top & bottom pins
+        pins.move(to: CGPoint(x: center.x + delta, y: bodyRect.maxY))
+        pins.line(to: CGPoint(x: center.x + delta, y: bodyRect.maxY + pinLength))
+        pins.move(to: CGPoint(x: center.x + delta, y: bodyRect.minY))
+        pins.line(to: CGPoint(x: center.x + delta, y: bodyRect.minY - pinLength))
+        // Left & right pins
+        pins.move(to: CGPoint(x: bodyRect.minX, y: center.y + delta))
+        pins.line(to: CGPoint(x: bodyRect.minX - pinLength, y: center.y + delta))
+        pins.move(to: CGPoint(x: bodyRect.maxX, y: center.y + delta))
+        pins.line(to: CGPoint(x: bodyRect.maxX + pinLength, y: center.y + delta))
+        pins.stroke()
+    }
 }
 
 // MARK: - App icon
@@ -91,23 +83,34 @@ func renderAppIcon(px: Int) -> Data? {
     guard let rep = bitmapCanvas(px, px), let ctx = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
     rep.size = NSSize(width: size, height: size)
 
-    // Every renderer in MakeIcon.swift focuses the graphics context before
-    // drawing; without this the draws land nowhere and the PNGs come out empty.
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = ctx
-    // The exported Default rendition is the finished icon design: background,
-    // layering and system-grid margins are baked in, so it maps onto the canvas
-    // 1:1 instead of being re-framed like the old mark-on-squircle composite.
-    // Source rect = the ENTIRE master, in the MASTER's coordinate space
-    // (appIconMaster.size), never the target's — a size-sized source rect would
-    // crop the bottom-left corner of the 1024x1024 master instead of scaling.
-    // (This SDK's draw(in:from:...) types from: as non-optional NSRect, so
-    // full-source must be spelled out rather than passed as nil.)
-    appIconMaster.draw(in: NSRect(x: 0, y: 0, width: size, height: size),
-                       from: NSRect(origin: .zero, size: appIconMaster.size),
-                       operation: .sourceOver, fraction: 1,
-                       respectFlipped: false,
-                       hints: [.interpolation: NSImageInterpolation.high.rawValue])
+
+    let margin = size * 0.095
+    let squircleRect = CGRect(x: margin, y: margin, width: size - margin * 2, height: size - margin * 2)
+    let radius = squircleRect.width * 0.225
+    let squircle = NSBezierPath(roundedRect: squircleRect, xRadius: radius, yRadius: radius)
+
+    // Deep Intel-inspired navy/cobalt gradient background
+    let topColor = NSColor(calibratedRed: 0.05, green: 0.22, blue: 0.48, alpha: 1.0)
+    let bottomColor = NSColor(calibratedRed: 0.02, green: 0.08, blue: 0.20, alpha: 1.0)
+    if let gradient = NSGradient(starting: topColor, ending: bottomColor) {
+        gradient.draw(in: squircle, angle: -90)
+    } else {
+        bottomColor.setFill()
+        squircle.fill()
+    }
+
+    // Subtle cyan border highlight
+    NSColor(calibratedRed: 0.25, green: 0.72, blue: 0.98, alpha: 0.45).setStroke()
+    squircle.lineWidth = max(1.0, size * 0.015)
+    squircle.stroke()
+
+    // Draw glowing cyan/white processor mark inside the squircle
+    let glyphColor = NSColor(calibratedRed: 0.42, green: 0.86, blue: 1.0, alpha: 1.0)
+    drawMark(into: squircleRect.insetBy(dx: squircleRect.width * 0.14, dy: squircleRect.height * 0.14),
+             color: glyphColor)
+
     NSGraphicsContext.restoreGraphicsState()
     return rep.representation(using: .png, properties: [:])
 }
@@ -194,7 +197,7 @@ for scale in [1, 2] {
 
 // Trimmed mark for in-app use (panel header, onboarding, About).
 let markWidth = 640
-let markHeight = Int(CGFloat(markWidth) * sourceRect.height / sourceRect.width)
+let markHeight = 324
 if let rep = bitmapCanvas(markWidth, markHeight), let ctx = NSGraphicsContext(bitmapImageRep: rep) {
     rep.size = NSSize(width: markWidth, height: markHeight)
     NSGraphicsContext.saveGraphicsState()

@@ -109,6 +109,8 @@ enum QuickTogglesSupport {
     static let vorssaintBundleIdentifiers = [
         "com.vorssaint.utils",
         "com.vorssaint.utils.dev",
+        "io.github.ngtanthanh-qc.vorssaint-intel",
+        "io.github.ngtanthanh-qc.vorssaint-intel.dev",
     ]
 
     /// `NSApplication.ActivationPolicy.regular.rawValue`. Kept as an Int so this
