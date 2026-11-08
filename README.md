@@ -51,6 +51,10 @@ Reorder or hide panel sections, choose a compact layout, and export settings to 
 - **Microphone tools.** Choose a preferred input, adjust its level on supported devices, and apply available microphone mute or input-volume controls with one shortcut. Siri and some apps may still hear you; Mic Mute is not a privacy lock. Its indicator shows that the feature is on, not that every app receives silence.
 - **Music app blocker.** Prevent unwanted Music launches after detected playback-button presses. Requires Accessibility.
 
+<p align="center">
+  <img src="docs/assets/readme/panel-fxsound-eq.jpg" width="320" alt="VorsIntel Volume Mixer with integrated FxSound Equalizer and Psychoacoustic Audio Enhancer">
+</p>
+
 ### Know what your Mac is doing
 
 - **System monitor.** CPU, GPU, memory, temperatures, battery health and power use, with history graphs and a view of energy-hungry apps.
