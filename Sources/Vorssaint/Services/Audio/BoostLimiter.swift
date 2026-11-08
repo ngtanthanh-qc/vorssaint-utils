@@ -175,6 +175,7 @@ final class BoostLookaheadLimiter {
 /// allocated with the engine, never in the realtime callback.
 final class BoostLookaheadBufferListLimiter {
     private let channelCapacity: Int
+    private let eqState: FxSoundDSPState
     private var delay: ContiguousArray<Float>
     private var position = 0
     private var filledFrames = 0
@@ -187,6 +188,7 @@ final class BoostLookaheadBufferListLimiter {
 
     init(channelCapacity: Int) {
         self.channelCapacity = max(1, channelCapacity)
+        self.eqState = FxSoundDSPState(channelCapacity: self.channelCapacity)
         delay = ContiguousArray(repeating: 0,
                                 count: BoostLookaheadLimiter.lookaheadFrames
                                     * self.channelCapacity)
@@ -196,6 +198,7 @@ final class BoostLookaheadBufferListLimiter {
     /// delay and envelope before rendering, without allocating new storage.
     func reset() {
         activeChannels = 0
+        eqState.reset()
     }
 
     @discardableResult
@@ -218,7 +221,10 @@ final class BoostLookaheadBufferListLimiter {
             attackStep = 0
             holdFrames = 0
             activeChannels = channels
+            eqState.reset()
         }
+
+        eqState.process(buffers, frames: frames)
 
         let ceiling = BoostLimiter.ceiling
         for frame in 0..<frames {

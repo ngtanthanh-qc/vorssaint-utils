@@ -532,9 +532,11 @@ enum MixerRoutingSupport {
                                selectedOutputDeviceUID: String?,
                                targetOutputDeviceUID: String?,
                                defaultOutputDeviceUID: String?,
-                               universalOutputRouteUID: String? = nil) -> Bool {
+                               universalOutputRouteUID: String? = nil,
+                               equalizerActive: Bool = FxSoundParameterBox.shared.isActive) -> Bool {
         guard hasAudioObjects else { return false }
         guard let targetOutputDeviceUID else { return false }
+        if equalizerActive { return true }
         if !isUnity(volume) { return true }
         if let selectedOutputDeviceUID {
             // An explicit route still matters when it happens to be the
@@ -552,7 +554,9 @@ enum MixerRoutingSupport {
     static func rowMayBeTapped(savedVolume: Double?,
                                savedRouteUID: String?,
                                defaultOutputDeviceUID: String?,
-                               universalOutputRouteUID: String? = nil) -> Bool {
+                               universalOutputRouteUID: String? = nil,
+                               equalizerActive: Bool = FxSoundParameterBox.shared.isActive) -> Bool {
+        if equalizerActive, defaultOutputDeviceUID != nil { return true }
         if let savedVolume, !isUnity(savedVolume) { return true }
         if savedRouteUID != nil { return true }
         guard let universalOutputRouteUID else { return false }

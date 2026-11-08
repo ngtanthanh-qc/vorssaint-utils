@@ -1712,5 +1712,30 @@ enum MixerFeatureTests {
                 && !name.isEmpty && name.hasSuffix(hint)
                 && panel.components(separatedBy: hint).count == 3,
                "the reorder hint remains on both the app icon and name")
+
+        // FxSound Equalizer & Audio Enhancer tests
+        suite.expect(FxSoundBand.allCases.count == 9, "FxSound EQ exposes 9 frequency bands")
+        suite.expect(FxSoundEffect.allCases.count == 5, "FxSound Enhancer exposes 5 psychoacoustic effects")
+        suite.expect(FxSoundPreset.flat.bandGains.allSatisfy { $0 == 0 },
+                     "Flat preset leaves all 9 EQ bands at 0 dB")
+        suite.expect(FxSoundPreset.bassBoost.effectLevels[.bassBoost] == 9,
+                     "Bass Boost preset raises the Bass Boost effect")
+        suite.expect(MixerRoutingSupport.requiresEngine(volume: 1,
+                                                        selectedOutputDeviceUID: nil,
+                                                        targetOutputDeviceUID: "BuiltInSpeakerDevice",
+                                                        defaultOutputDeviceUID: "BuiltInSpeakerDevice",
+                                                        equalizerActive: true),
+                     "an active FxSound equalizer engages the tap engine even at 100 percent default output")
+        let eqParams = FxSoundCompiledParameters.compile(
+            generation: 1,
+            isEnabled: true,
+            bandGains: FxSoundPreset.music.bandGains,
+            effects: FxSoundPreset.music.effectLevels
+        )
+        suite.expect(eqParams.isEnabled && eqParams.activeStageCount > 0,
+                     "Music preset compiles active biquad filter stages")
+        let peaking = FxSoundBiquadCoefficients.peaking(frequency: 1000, sampleRate: 48_000, q: 1.41, gainDB: 6.0)
+        suite.expect(!peaking.isIdentity && peaking.b0 > 1.0,
+                     "compiled FxSound peaking filter boosts target frequency")
     }
 }

@@ -2148,6 +2148,12 @@ final class AppVolumeMixer: ObservableObject {
         reconcileEngines(with: apps)
     }
 
+    func reconcileForEqualizerChange() {
+        guard listenerInstalled, !stopped else { return }
+        reconcileEngines(with: apps)
+        clearPermissionIfNoActiveAdjustments()
+    }
+
     /// One shared trailing pass for pending rebuilds and render checks.
     /// Playing engines keep checking their atomic counters; once all apps
     /// are idle and no rebuild is pending, no further pass is scheduled.

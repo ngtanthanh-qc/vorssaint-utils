@@ -60,6 +60,11 @@ struct MixerSection: View {
         VStack(alignment: .leading, spacing: 8) {
             audioDevicesSection
 
+            if AppVolumeMixer.isSupported {
+                Divider()
+                FxSoundEQView()
+            }
+
             if AppVolumeMixer.isSupported, (!visibleApps.isEmpty || mixer.needsPermission) {
                 Divider()
             }

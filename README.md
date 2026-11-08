@@ -45,6 +45,7 @@ Reorder or hide panel sections, choose a compact layout, and export settings to 
 ### Sound
 
 - **Volume mixer.** Set volume per app, boost quiet audio past 100%, and pin or reorder favorites. No audio driver required.
+- **FxSound Equalizer & Audio Enhancer.** System-wide 9-band graphic EQ (`86 Hz`–`13 kHz`, `±12 dB`), 5 psychoacoustic effects (*Clarity*, *Ambience*, *Surround Sound*, *Dynamic Boost*, *Bass Boost*), live frequency-response curve, and built-in presets (*General*, *Music*, *Movies*, *Gaming*, *Voice / Podcast*, *Bass Boost*, *Streaming Video*, *Flat*, *Custom*) protected by a lookahead brickwall peak limiter.
 - **Per app output.** Play music through speakers while a call uses your headset.
 - **Output switcher.** Switch audio outputs with a shortcut and lower the volume when headphones disconnect.
 - **Microphone tools.** Choose a preferred input, adjust its level on supported devices, and apply available microphone mute or input-volume controls with one shortcut. Siri and some apps may still hear you; Mic Mute is not a privacy lock. Its indicator shows that the feature is on, not that every app receives silence.
