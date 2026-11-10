@@ -133,9 +133,17 @@ elif (( STYLE_STATUS != 0 )); then
 fi
 
 sync
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+    -u "$MOUNT/$APP_NAME.app" >/dev/null 2>&1 || true
 hdiutil detach "$MOUNT" -quiet \
     || hdiutil detach "$MOUNT" -force -quiet
 MOUNT=""
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+    -u "$PWD/$APP" >/dev/null 2>&1 || true
+if [[ -d "/Applications/$APP_NAME.app" ]]; then
+    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+        -f "/Applications/$APP_NAME.app" >/dev/null 2>&1 || true
+fi
 
 echo "▸ Compressing…"
 mkdir -p dist

@@ -105,8 +105,7 @@ legacy_identity_installed() {
 # up front instead of falling through to ad-hoc — setup-signing.sh is free,
 # offline and idempotent. Gating on the install rather than the variant keeps
 # this off CI, where neither ci.yml nor release.yml passes --install.
-if (( DEV || INSTALL )) && [[ -z "$(developer_id_identity)" ]] \
-    && ! legacy_identity_installed; then
+if [[ -z "$(developer_id_identity)" ]] && ! legacy_identity_installed; then
     echo "▸ No signing identity installed; creating the stable local one…"
     if ! ./Tools/setup-signing.sh; then
         echo "  ⚠ Tools/setup-signing.sh failed; signing ad-hoc instead." >&2
@@ -381,6 +380,7 @@ if (( TEST )); then
         Sources/Vorssaint/Core/ConnectedDevicesStrings.swift
         Sources/Vorssaint/Services/FanControl/FanControlSupport.swift
         Sources/Vorssaint/Services/FanControl/FanControlResumeSupport.swift
+        Sources/Vorssaint/Services/BatteryCharge/BatteryChargeLimitSupport.swift
         Sources/Vorssaint/Services/Snippets/TextSnippetSupport.swift
         Sources/Vorssaint/Services/RadialMenu/RadialMenuSupport.swift
         Sources/Vorssaint/Services/QuickTools/ScratchpadSupport.swift
@@ -646,6 +646,7 @@ swiftc -O -target "$TARGET" -sdk "$SDK" "${SDK_COMPAT_FLAGS[@]}" "${BUILD_VARIAN
     Sources/Vorssaint/Services/SystemMonitor/SMCClient.swift \
     Sources/Vorssaint/Services/Metrics/TemperatureSensorSelector.swift \
     Sources/Vorssaint/Services/FanControl/FanControlHardware.swift \
+    Sources/Vorssaint/Services/BatteryCharge/BatteryChargeLimitSupport.swift \
     Sources/FanControlHelper/main.swift \
     -o "build/$FAN_HELPER_ID"
 if [[ "$HOST_ARCH" == "$(uname -m)" ]] || [[ "$(uname -m)" == "arm64" && "$HOST_ARCH" == "x86_64" ]]; then
@@ -867,9 +868,10 @@ wait_for_install_metadata() {
     done
 }
 
-# Installed development builds only need the copy in /Applications. Retaining
-# another app in each checkout pollutes application search with stale builds.
-if (( DEV )); then
+# Installed builds only need the copy in /Applications. Retaining another app
+# in each checkout pollutes application search and BTM daemon resolution with
+# stale bundles.
+if (( DEV || INSTALL )); then
     for old_bundle in "build/stage/$APP_NAME.app" "build/stage.noindex/$APP_NAME.app"; do
         if [[ -d "$old_bundle" ]]; then
             /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
@@ -916,5 +918,7 @@ if (( INSTALL )); then
     rm -rf "$INSTALL_DEST"
     ditto --noextattr --noqtn "$STAGE" "$INSTALL_DEST"
     sign_installed_bundle "$INSTALL_DEST"
+    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+        -f "$INSTALL_DEST" >/dev/null 2>&1 || true
     echo "✓ Installed: $INSTALL_DEST"
 fi

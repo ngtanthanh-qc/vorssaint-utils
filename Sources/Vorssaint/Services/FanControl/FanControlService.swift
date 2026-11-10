@@ -66,6 +66,7 @@ final class FanControlService: ObservableObject {
             }
         } else {
             UserDefaults.standard.removeObject(forKey: DefaultsKey.fanControlResumeConfiguration)
+            UserDefaults.standard.set(false, forKey: DefaultsKey.batteryChargeLimitEnabled)
             restoreThenUnregister()
         }
     }
@@ -98,7 +99,11 @@ final class FanControlService: ObservableObject {
         case .requiresApproval:
             SMAppService.openSystemSettingsLoginItems()
         case .enabled:
-            requestStatus()
+            if error == .helperUnavailable {
+                _ = performHelperReRegistration(version: Self.helperVersion)
+            } else {
+                requestStatus()
+            }
         case .unavailable:
             error = .helperUnavailable
         case .notRegistered:
@@ -293,6 +298,9 @@ final class FanControlService: ObservableObject {
             connection.invalidate()
             return false
         }
+        // The charge limit persists in the SMC after the helper is gone, so
+        // return charging to 100% before detaching.
+        BatteryChargeLimitService.resetForRemoval(using: proxy)
         proxy.restoreAutomatic { data in
             if let response = FanControlIPC.decode(data) {
                 resultLock.withLock {
@@ -378,7 +386,9 @@ final class FanControlService: ObservableObject {
         send { proxy, reply in proxy.status(withReply: reply) } completion: { response in
             guard self.finishRequest(generation) else { return }
             guard let response else {
+                if self.reRegisterBrokenHelperIfNeeded() { return }
                 self.error = .helperUnavailable
+                self.refreshLocalProbe(preserveError: .helperUnavailable)
                 return
             }
             self.apply(response)
@@ -401,6 +411,12 @@ final class FanControlService: ObservableObject {
                 finished = true
                 completion(response)
             }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+            guard !finished else { return }
+            self?.connection?.invalidate()
+            self?.connection = nil
+            finish(nil)
         }
         guard let proxy = proxy(errorHandler: { [weak self] failedConnection in
             DispatchQueue.main.async {
@@ -503,6 +519,17 @@ final class FanControlService: ObservableObject {
         guard !installed.isEmpty, installed != current,
               registrationAttemptedVersion != current,
               !UserDefaults.standard.bool(forKey: DefaultsKey.fanControlRecoveryNeeded) else { return false }
+        return performHelperReRegistration(version: current)
+    }
+
+    private func reRegisterBrokenHelperIfNeeded() -> Bool {
+        let current = Self.helperVersion
+        guard registrationAttemptedVersion != current,
+              !UserDefaults.standard.bool(forKey: DefaultsKey.fanControlRecoveryNeeded) else { return false }
+        return performHelperReRegistration(version: current)
+    }
+
+    private func performHelperReRegistration(version current: String) -> Bool {
         registrationAttemptedVersion = current
         isWorking = true
         Self.appService.unregister { error in
@@ -510,6 +537,7 @@ final class FanControlService: ObservableObject {
                 guard error == nil else {
                     self.isWorking = false
                     self.error = .helperUnavailable
+                    self.refreshLocalProbe(preserveError: .helperUnavailable)
                     return
                 }
                 do {
@@ -517,24 +545,32 @@ final class FanControlService: ObservableObject {
                     UserDefaults.standard.set(current, forKey: DefaultsKey.fanControlHelperVersion)
                     self.isWorking = false
                     self.refreshAccessState()
-                    if self.accessState == .enabled { self.requestStatus() }
+                    if self.accessState == .requiresApproval {
+                        SMAppService.openSystemSettingsLoginItems()
+                    } else if self.accessState == .enabled {
+                        self.requestStatus()
+                    }
                 } catch {
                     self.isWorking = false
                     self.refreshAccessState()
+                    if self.accessState == .requiresApproval {
+                        SMAppService.openSystemSettingsLoginItems()
+                    }
                     self.error = .helperUnavailable
+                    self.refreshLocalProbe(preserveError: .helperUnavailable)
                 }
             }
         }
         return true
     }
 
-    private func refreshLocalProbe() {
+    private func refreshLocalProbe(preserveError: FanControlErrorCode? = nil) {
         probeQueue.async {
             if self.probeHardware == nil { self.probeHardware = FanControlHardware() }
             let result: Result<FanControlSnapshot, FanControlErrorCode>
             guard let probe = self.probeHardware else {
-                result = .failure(.unsupportedHardware)
-                DispatchQueue.main.async { self.applyProbe(result) }
+                result = .failure(preserveError ?? .unsupportedHardware)
+                DispatchQueue.main.async { self.applyProbe(result, preserveError: preserveError) }
                 return
             }
             do {
@@ -544,40 +580,42 @@ final class FanControlService: ObservableObject {
             } catch FanControlHardwareError.alreadyControlled {
                 if let snapshot = try? probe.telemetrySnapshot() {
                     DispatchQueue.main.async {
-                        self.applyProbeSnapshot(snapshot, error: .alreadyControlled)
+                        self.applyProbeSnapshot(snapshot, error: preserveError ?? .alreadyControlled, allowWhenEnabled: preserveError != nil)
                     }
                     return
                 }
-                result = .failure(.alreadyControlled)
+                result = .failure(preserveError ?? .alreadyControlled)
             } catch {
                 if let snapshot = try? probe.telemetrySnapshot() {
                     DispatchQueue.main.async {
-                        self.applyProbeSnapshot(snapshot, error: .unsupportedHardware)
+                        self.applyProbeSnapshot(snapshot, error: preserveError ?? .unsupportedHardware, allowWhenEnabled: preserveError != nil)
                     }
                     return
                 }
-                result = .failure(.unsupportedHardware)
+                result = .failure(preserveError ?? .unsupportedHardware)
             }
-            DispatchQueue.main.async { self.applyProbe(result) }
+            DispatchQueue.main.async { self.applyProbe(result, preserveError: preserveError) }
         }
     }
 
-    private func applyProbe(_ result: Result<FanControlSnapshot, FanControlErrorCode>) {
-        guard accessState != .enabled else { return }
+    private func applyProbe(_ result: Result<FanControlSnapshot, FanControlErrorCode>,
+                            preserveError: FanControlErrorCode? = nil) {
+        guard accessState != .enabled || preserveError != nil else { return }
         switch result {
         case .success(let snapshot):
-            applyProbeSnapshot(snapshot,
-                               error: snapshot.fans.contains(where: \.isManuallyControlled)
-                                   ? .alreadyControlled : nil)
+            let resolvedError = preserveError
+                ?? (snapshot.fans.contains(where: \.isManuallyControlled) ? .alreadyControlled : nil)
+            applyProbeSnapshot(snapshot, error: resolvedError, allowWhenEnabled: preserveError != nil)
         case .failure(let error):
             snapshot = .empty
-            self.error = error
+            self.error = preserveError ?? error
         }
     }
 
     private func applyProbeSnapshot(_ snapshot: FanControlSnapshot,
-                                    error: FanControlErrorCode?) {
-        guard accessState != .enabled else { return }
+                                    error: FanControlErrorCode?,
+                                    allowWhenEnabled: Bool = false) {
+        guard accessState != .enabled || allowWhenEnabled else { return }
         self.snapshot = snapshot
         self.error = error
     }
@@ -601,7 +639,11 @@ final class FanControlService: ObservableObject {
         }
         let generation = beginRequest()
         isWorking = true
-        send { proxy, reply in proxy.restoreAutomatic(withReply: reply) } completion: { response in
+        // Return charging to 100% first; the helper serializes both requests.
+        send { proxy, reply in
+            proxy.setBatteryChargeLimit(BatteryChargeLimitPolicy.maximumLimit) { _ in }
+            proxy.restoreAutomatic(withReply: reply)
+        } completion: { response in
             guard self.finishRequest(generation) else { return }
             self.isWorking = false
             guard let response, response.succeeded, !response.snapshot.isCooling else { return }

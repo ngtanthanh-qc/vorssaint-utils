@@ -446,6 +446,8 @@ enum DefaultsKey {
     // automatic fan control before this marker can be cleared.
     static let fanControlRecoveryNeeded = "fanControlRecoveryNeeded"
     static let fanControlHelperVersion = "fanControlHelperVersion"
+    static let batteryChargeLimitEnabled = "batteryChargeLimitEnabled"
+    static let batteryChargeLimit = "batteryChargeLimit"
     // System monitor — per-metric history graphs (each independently toggleable).
     static let monitorGraphCPU = "monitorGraphCPU"
     static let monitorGraphGPU = "monitorGraphGPU"
@@ -1706,6 +1708,8 @@ enum Defaults {
         DefaultsKey.fanControlResumeConfiguration: "",
         DefaultsKey.fanControlRecoveryNeeded: false,
         DefaultsKey.fanControlHelperVersion: "",
+        DefaultsKey.batteryChargeLimitEnabled: false,
+        DefaultsKey.batteryChargeLimit: BatteryChargeLimitPolicy.defaultLimit,
         DefaultsKey.panelNavigationEnabled: true,
         DefaultsKey.monitorGraphCPU: true,
         DefaultsKey.monitorGraphGPU: true,

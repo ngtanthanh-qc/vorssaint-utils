@@ -26,9 +26,18 @@ final class FanControlHardware {
         let minimum: SMCClient.Key
         let maximum: SMCClient.Key
         let target: SMCClient.Key
-        let mode: SMCClient.Key
+        let mode: ModeControl
         let minimumRPM: Double
         let maximumRPM: Double
+    }
+
+    /// How a fan is switched between automatic and forced (manual) mode.
+    /// Apple Silicon and T2 Intel Macs expose a per-fan `F<n>Md` byte. Older
+    /// Intel Macs have no per-fan key and instead use the shared `FS! ` ui16
+    /// bitmask, where bit `n` forces fan `n`.
+    private enum ModeControl {
+        case perFan(SMCClient.Key)
+        case forcedMask(SMCClient.Key, bit: Int)
     }
 
     private struct TemperatureKeys {
@@ -88,7 +97,7 @@ final class FanControlHardware {
 
     func startCooling(level: Int) throws -> [FanControlFanReading] {
         let fans = try discoverControlledFans()
-        guard try fans.allSatisfy({ try FanControlPolicy.isAutomaticMode(modeValue($0.mode)) }) else {
+        guard try fans.allSatisfy({ try FanControlPolicy.isAutomaticMode(modeValue($0)) }) else {
             throw FanControlHardwareError.alreadyControlled
         }
         if let forceTest = forceTestKey(), try byteValue(forceTest) != 0 {
@@ -115,7 +124,7 @@ final class FanControlHardware {
 
         if directSucceeded {
             Thread.sleep(forTimeInterval: 0.25)
-            directSucceeded = fans.allSatisfy { (try? modeValue($0.mode)) == 1 }
+            directSucceeded = fans.allSatisfy { (try? modeValue($0)) == 1 }
         }
 
         if !directSucceeded {
@@ -198,7 +207,7 @@ final class FanControlHardware {
 
     func validateAutomaticControl() throws {
         let fans = try discoverControlledFans()
-        guard try fans.allSatisfy({ try FanControlPolicy.isAutomaticMode(modeValue($0.mode)) }) else {
+        guard try fans.allSatisfy({ try FanControlPolicy.isAutomaticMode(modeValue($0)) }) else {
             throw FanControlHardwareError.alreadyControlled
         }
         if let forceTest = forceTestKey() {
@@ -220,7 +229,7 @@ final class FanControlHardware {
             _ = setByte(0, for: forceTest, attempts: 20)
         }
         let automatic = fans.allSatisfy { fan in
-            (try? modeValue(fan.mode)).map(FanControlPolicy.isAutomaticMode) == true
+            (try? modeValue(fan)).map(FanControlPolicy.isAutomaticMode) == true
         }
         let forceTestOff = forceTestKey().map { (try? byteValue($0)) == 0 } ?? true
         if automatic && forceTestOff { activeTargets.removeAll() }
@@ -279,8 +288,7 @@ final class FanControlHardware {
                   let minimum = client.key(named: "F\(index)Mn"),
                   let maximum = client.key(named: "F\(index)Mx"),
                   let target = client.key(named: "F\(index)Tg"),
-                  let mode = modeKey(for: index),
-                  mode.dataSize == 1,
+                  let mode = modeControl(for: index),
                   let minimumRPM = client.readValue(minimum),
                   let maximumRPM = client.readValue(maximum),
                   FanControlPolicy.validBounds(minimum: minimumRPM, maximum: maximumRPM),
@@ -309,9 +317,15 @@ final class FanControlHardware {
         return fans
     }
 
-    private func modeKey(for index: Int) -> SMCClient.Key? {
+    private func modeControl(for index: Int) -> ModeControl? {
         for name in ["F\(index)md", "F\(index)Md"] {
-            if let key = client.key(named: name), client.readBytes(key) != nil { return key }
+            if let key = client.key(named: name), key.dataSize == 1,
+               client.readBytes(key) != nil { return .perFan(key) }
+        }
+        // Pre-T2 Intel Macs: one shared forced-mode bitmask for all fans.
+        if index < 16, let key = client.key(named: "FS! "), key.dataSize == 2,
+           client.readBytes(key)?.count == 2 {
+            return .forcedMask(key, bit: index)
         }
         return nil
     }
@@ -369,7 +383,7 @@ final class FanControlHardware {
                                         maximumRPM: maximum,
                                         targetRPM: max(0, target),
                                         isManuallyControlled: try !FanControlPolicy.isAutomaticMode(
-                                            modeValue(fan.mode)
+                                            modeValue(fan)
                                         ))
         }
     }
@@ -378,7 +392,7 @@ final class FanControlHardware {
         guard fans.count == targets.count else { return false }
         for attempt in 0..<attempts {
             let matches = zip(fans, targets).allSatisfy { fan, expected in
-                guard (try? modeValue(fan.mode)) == 1,
+                guard (try? modeValue(fan)) == 1,
                       let target = client.readValue(fan.target) else { return false }
                 return FanControlPolicy.targetRPMMatches(target: target, expected: expected)
             }
@@ -388,8 +402,36 @@ final class FanControlHardware {
         return false
     }
 
-    private func modeValue(_ key: SMCClient.Key) throws -> UInt8 {
-        try byteValue(key)
+    private func modeValue(_ fan: Fan) throws -> UInt8 {
+        switch fan.mode {
+        case .perFan(let key):
+            return try byteValue(key)
+        case .forcedMask(let key, let bit):
+            return try (maskValue(key) >> UInt16(bit)) & 1 == 1 ? 1 : 0
+        }
+    }
+
+    private func maskValue(_ key: SMCClient.Key) throws -> UInt16 {
+        guard let bytes = client.readBytes(key), bytes.count == 2 else {
+            throw FanControlHardwareError.operationFailed
+        }
+        return UInt16(bytes[0]) << 8 | UInt16(bytes[1])
+    }
+
+    /// One unverified mode write. For the shared Intel bitmask this is a
+    /// read-modify-write so other fans keep their current mode.
+    @discardableResult
+    private func writeMode(_ value: UInt8, for fan: Fan) -> Bool {
+        switch fan.mode {
+        case .perFan(let key):
+            return (try? client.writeBytes([value], to: key)) != nil
+        case .forcedMask(let key, let bit):
+            guard let current = try? maskValue(key) else { return false }
+            let flag = UInt16(1) << UInt16(bit)
+            let updated = value == 0 ? current & ~flag : current | flag
+            return (try? client.writeBytes([UInt8(updated >> 8), UInt8(updated & 0xff)],
+                                           to: key)) != nil
+        }
     }
 
     private func byteValue(_ key: SMCClient.Key) throws -> UInt8 {
@@ -400,8 +442,11 @@ final class FanControlHardware {
     }
 
     private func setMode(_ value: UInt8, for fan: Fan, attempts: Int) -> Bool {
-        guard setByte(value, for: fan.mode, attempts: attempts) else { return false }
-        return (try? modeValue(fan.mode)) == value
+        for attempt in 0..<attempts {
+            if writeMode(value, for: fan), (try? modeValue(fan)) == value { return true }
+            if attempt + 1 < attempts { Thread.sleep(forTimeInterval: 0.05) }
+        }
+        return false
     }
 
     private func setTargetRPM(_ target: Double, for fan: Fan, attempts: Int) -> Bool {
@@ -410,7 +455,7 @@ final class FanControlHardware {
             _ = writeManualPair(for: fan, target: target)
             if let currentTarget = client.readValue(fan.target),
                FanControlPolicy.targetRPMMatches(target: currentTarget, expected: target),
-               (try? modeValue(fan.mode)) == 1 {
+               (try? modeValue(fan)) == 1 {
                 return true
             }
             if attempt + 1 < attempts { Thread.sleep(forTimeInterval: 0.05) }
@@ -420,7 +465,7 @@ final class FanControlHardware {
 
     private func writeManualPair(for fan: Fan, target: Double) -> Bool {
         guard target.isFinite else { return false }
-        _ = try? client.writeBytes([1], to: fan.mode)
+        writeMode(1, for: fan)
         do {
             try client.writeValue(target, to: fan.target)
             return true

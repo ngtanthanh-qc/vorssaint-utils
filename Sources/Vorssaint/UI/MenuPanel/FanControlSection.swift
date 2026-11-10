@@ -42,6 +42,7 @@ struct FanControlSection: View {
                 .onAppear { service.panelDidAppear() }
                 .onDisappear { service.panelDidDisappear() }
                 .onChange(of: resume) { _, _ in service.resumePreferenceDidChange() }
+            BatteryChargeLimitCard()
         }
     }
 
@@ -292,10 +293,11 @@ struct FanControlCardContent: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .frame(maxWidth: .infinity)
-        } else if accessState == .requiresApproval, !snapshot.fans.isEmpty {
+        } else if accessState == .requiresApproval || error == .helperUnavailable, !snapshot.fans.isEmpty {
             Button(strings.openSettings, action: authorize)
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
+                .disabled(isWorking)
                 .frame(maxWidth: .infinity)
         } else if accessState == .enabled, controlsCanAppear {
             switch mode {

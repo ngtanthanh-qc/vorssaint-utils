@@ -85,6 +85,7 @@ private final class FanControlController {
     private let queue = DispatchQueue(label: "com.vorssaint.fan-control.helper")
     private let ownership = FanControlOwnership()
     private var hardware: FanControlHardware?
+    private var batteryHardware: BatteryChargeLimitHardware?
     private var owner: UUID?
     private var isCooling = false
     private var isRecovering = false
@@ -175,6 +176,29 @@ private final class FanControlController {
                 : FanControlResponse.failure(.controlFailed, snapshot: self.currentSnapshot())
             reply(FanControlIPC.encode(response))
             self.scheduleExitIfIdle()
+        }
+    }
+
+    /// Reads (limit == nil) or writes the Intel battery charge limit. Shares
+    /// the controller queue so SMC access stays serialized with fan writes.
+    func batteryChargeLimit(_ limit: Int?, reply: @escaping (Data) -> Void) {
+        queue.async {
+            if self.batteryHardware == nil { self.batteryHardware = BatteryChargeLimitHardware() }
+            guard let battery = self.batteryHardware, battery.isSupported else {
+                reply(BatteryChargeLimitIPC.encode(.unsupported))
+                return
+            }
+            guard let limit else {
+                reply(BatteryChargeLimitIPC.encode(battery.status(succeeded: true)))
+                return
+            }
+            let succeeded = battery.setLimit(limit)
+            if succeeded {
+                self.log.notice("Battery charge limit set to \(limit, privacy: .public)%")
+            } else {
+                self.log.error("Battery charge limit write failed")
+            }
+            reply(BatteryChargeLimitIPC.encode(battery.status(succeeded: succeeded)))
         }
     }
 
@@ -552,6 +576,14 @@ private final class FanControlSession: NSObject, FanControlXPCProtocol {
 
     func restoreAutomatic(withReply reply: @escaping (Data) -> Void) {
         controller.restore(reply: reply)
+    }
+
+    func batteryChargeLimit(withReply reply: @escaping (Data) -> Void) {
+        controller.batteryChargeLimit(nil, reply: reply)
+    }
+
+    func setBatteryChargeLimit(_ limit: Int, withReply reply: @escaping (Data) -> Void) {
+        controller.batteryChargeLimit(limit, reply: reply)
     }
 }
 

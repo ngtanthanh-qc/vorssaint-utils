@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [3.4.4] - 2026-11-10
+
+### Added
+- Intel Battery Charge Limit (`BCLM` SMC key) inside Fan Control to cap charging between 50% and 100%, re-applied at launch and after wake.
+
+### Fixed
+- Fan Control on Intel Macs: support pre-T2 forced-mode bitmask (`FS! `) alongside per-fan `F<n>Md`, auto-recover stale BTM helper registrations, and prevent XPC calls from hanging when the helper is unavailable.
+
 ### Summary
 More reliable window switching, audio, notifications and display controls, with better GIF exports, large-image editing and compact-panel behavior. New options improve window dragging, shortcut setup and uninstaller selection.
 

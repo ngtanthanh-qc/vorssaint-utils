@@ -67,6 +67,9 @@ enum FanControlIdentifiers {
     func applyConfiguration(_ configuration: Data, withReply reply: @escaping (Data) -> Void)
     func heartbeat(withReply reply: @escaping (Data) -> Void)
     func restoreAutomatic(withReply reply: @escaping (Data) -> Void)
+    /// Intel battery charge limit (`BCLM`). Replies with `BatteryChargeLimitStatus`.
+    func batteryChargeLimit(withReply reply: @escaping (Data) -> Void)
+    func setBatteryChargeLimit(_ limit: Int, withReply reply: @escaping (Data) -> Void)
 }
 
 enum FanControlIPC {
