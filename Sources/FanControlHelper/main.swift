@@ -397,6 +397,7 @@ private final class FanControlController {
     }
 
     private func recoverAbandonedControlIfNeeded() {
+        restorePersistedBatteryLimitIfNeeded()
         guard ownership.acquire() else {
             scheduleExitIfIdle()
             return
@@ -412,6 +413,15 @@ private final class FanControlController {
             scheduleExitIfIdle()
         } else {
             startWatchdog()
+        }
+    }
+
+    private func restorePersistedBatteryLimitIfNeeded() {
+        guard let savedLimit = BatteryChargeLimitPolicy.loadPersistedUserLimit() else { return }
+        if batteryHardware == nil { batteryHardware = BatteryChargeLimitHardware() }
+        guard let battery = batteryHardware, battery.isSupported else { return }
+        if battery.currentLimit() != savedLimit {
+            _ = battery.setLimit(savedLimit)
         }
     }
 

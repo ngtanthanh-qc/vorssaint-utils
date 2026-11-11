@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [3.4.5] - 2026-11-11
+
+### Fixed
+- Intel Battery Charge Limit (`BCLM`): compensate for the ~3% raw-vs-UI state-of-charge offset on Intel SMC (`bclm`/AlDente behavior) so macOS stops at the chosen percentage, and continuously re-verify/re-apply the limit before sleep, across multi-stage wake/DarkWake intervals, on AC power source changes, and at boot via the privileged helper.
+
 ## [3.4.4] - 2026-11-10
 
 ### Added

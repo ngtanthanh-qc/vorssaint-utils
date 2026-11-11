@@ -3,6 +3,7 @@
 
 import AppKit
 import Foundation
+import IOKit.ps
 import ServiceManagement
 
 /// App side of the Intel battery charge limit. The SMC write runs in the
@@ -22,6 +23,8 @@ final class BatteryChargeLimitService: ObservableObject {
     private var probeHardware: BatteryChargeLimitHardware?
     private var connection: NSXPCConnection?
     private var observingWake = false
+    private var powerSourceRunLoopSource: CFRunLoopSource?
+    private var enforcementTimer: Timer?
     private var requestGeneration = 0
 
     private static var helperEnabled: Bool {
@@ -34,6 +37,10 @@ final class BatteryChargeLimitService: ObservableObject {
 
     deinit {
         NSWorkspace.shared.notificationCenter.removeObserver(self)
+        if let source = powerSourceRunLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .defaultMode)
+        }
+        enforcementTimer?.invalidate()
         connection?.invalidate()
     }
 
@@ -51,13 +58,17 @@ final class BatteryChargeLimitService: ObservableObject {
         isEnabled ? storedLimit : BatteryChargeLimitPolicy.maximumLimit
     }
 
-    /// Called once at launch: observe wake and re-apply a saved limit.
+    /// Called once at launch: observe wake, power source changes, and re-apply a saved limit.
     func start() {
         if !observingWake {
             observingWake = true
-            NSWorkspace.shared.notificationCenter.addObserver(
-                self, selector: #selector(didWake),
-                name: NSWorkspace.didWakeNotification, object: nil)
+            let center = NSWorkspace.shared.notificationCenter
+            center.addObserver(self, selector: #selector(willSleep),
+                               name: NSWorkspace.willSleepNotification, object: nil)
+            center.addObserver(self, selector: #selector(didWake),
+                               name: NSWorkspace.didWakeNotification, object: nil)
+            startPowerSourceMonitoring()
+            startEnforcementTimer()
         }
         if isEnabled { applyDesiredLimit() }
     }
@@ -142,10 +153,70 @@ final class BatteryChargeLimitService: ObservableObject {
         _ = semaphore.wait(timeout: .now() + 5)
     }
 
+    @objc private func willSleep() {
+        guard isEnabled else { return }
+        applyDesiredLimit()
+    }
+
     @objc private func didWake() {
         guard isEnabled else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            self?.applyDesiredLimit()
+        for delay in [1.0, 5.0, 15.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self, self.isEnabled else { return }
+                self.enforceLimitIfNeeded(forceWrite: delay == 1.0)
+            }
+        }
+    }
+
+    private func startPowerSourceMonitoring() {
+        guard powerSourceRunLoopSource == nil else { return }
+        let callback: IOPowerSourceCallbackType = { _ in
+            DispatchQueue.main.async {
+                BatteryChargeLimitService.shared.powerSourceDidChange()
+            }
+        }
+        if let source = IOPSNotificationCreateRunLoopSource(callback, nil)?.takeRetainedValue() {
+            CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
+            powerSourceRunLoopSource = source
+        }
+    }
+
+    private func startEnforcementTimer() {
+        enforcementTimer?.invalidate()
+        let timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            self?.enforceLimitIfNeeded(forceWrite: false)
+        }
+        timer.tolerance = 10
+        enforcementTimer = timer
+    }
+
+    private func powerSourceDidChange() {
+        guard isEnabled else { return }
+        enforceLimitIfNeeded(forceWrite: false)
+    }
+
+    /// Reads the current SMC `BCLM` locally without waking the root helper, and
+    /// triggers an XPC write only when the SMC value has drifted from the target.
+    private func enforceLimitIfNeeded(forceWrite: Bool) {
+        guard isEnabled, Self.helperEnabled, !isWorking else { return }
+        let target = desiredLimit
+        if forceWrite {
+            applyDesiredLimit()
+            return
+        }
+        probeQueue.async { [weak self] in
+            guard let self else { return }
+            if self.probeHardware == nil {
+                self.probeHardware = BatteryChargeLimitHardware()
+            }
+            guard let probe = self.probeHardware, probe.isSupported else { return }
+            let current = probe.currentLimit()
+            DispatchQueue.main.async {
+                self.status = BatteryChargeLimitStatus(supported: true, limit: current, succeeded: true)
+                if current != target {
+                    self.applyDesiredLimit()
+                }
+            }
         }
     }
 
