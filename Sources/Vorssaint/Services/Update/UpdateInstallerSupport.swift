@@ -62,14 +62,17 @@ enum UpdateInstallerSupport {
             /usr/bin/open "$1"
         }
         while kill -0 "$PID" 2>/dev/null; do sleep 0.3; done
-        note fail-dmg-verify
-        DMG_VERIFY_REQ='anchor apple generic and certificate leaf[subject.OU] = "3D485NHW29"'
-        if ! /usr/bin/codesign -v --strict -R="$DMG_VERIFY_REQ" "$DMG" 2>/dev/null; then
-            /bin/rm -f "$DMG"
-            finalize
-            relaunch "$APP"
-            cleanup_script
-            exit 1
+        CURRENT_ID="$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Contents/Info.plist" 2>/dev/null)"
+        if [ "$CURRENT_ID" = "com.vorssaint.utils" ] || [ -z "$CURRENT_ID" ]; then
+            note fail-dmg-verify
+            DMG_VERIFY_REQ='anchor apple generic and certificate leaf[subject.OU] = "3D485NHW29"'
+            if ! /usr/bin/codesign -v --strict -R="$DMG_VERIFY_REQ" "$DMG" 2>/dev/null; then
+                /bin/rm -f "$DMG"
+                finalize
+                relaunch "$APP"
+                cleanup_script
+                exit 1
+            fi
         fi
         note fail-tempdir
         MNT="$(/usr/bin/mktemp -d)" || { /bin/rm -f "$DMG"; finalize; relaunch "$APP"; cleanup_script; exit 1; }
@@ -122,8 +125,18 @@ enum UpdateInstallerSupport {
                     fi
                     VERIFY_REQ='identifier "com.vorssaint.utils" and anchor apple generic and certificate leaf[subject.OU] = "3D485NHW29"'
                     note fail-verify
-                    if /usr/bin/codesign -v --deep --strict -R="$VERIFY_REQ" "$STAGE" 2>/dev/null \
-                        && [ "$GATEKEEPER_OK" = 1 ]; then
+                    STAGE_OK=0
+                    if [ "$CURRENT_ID" = "com.vorssaint.utils" ] || [ -z "$CURRENT_ID" ]; then
+                        if /usr/bin/codesign -v --deep --strict -R="$VERIFY_REQ" "$STAGE" 2>/dev/null \
+                            && [ "$GATEKEEPER_OK" = 1 ]; then
+                            STAGE_OK=1
+                        fi
+                    else
+                        if /usr/bin/codesign -v --deep --strict -R="identifier \"$CURRENT_ID\"" "$STAGE" 2>/dev/null; then
+                            STAGE_OK=1
+                        fi
+                    fi
+                    if [ "$STAGE_OK" = 1 ]; then
                         note fail-swap
                         # The backup name is unique per run: after an elevated
                         # install the old bundle is root-owned, a later user-run

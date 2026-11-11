@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [3.4.6] - 2026-11-11
+
+### Fixed
+- In-app self-updater (`UpdateInstallerSupport`): verify updates against the running fork bundle identifier (`io.github.ngtanthanh-qc.vorssaint-intel`) instead of rejecting non-notarized fork DMGs against the upstream Apple Developer Team ID (`3D485NHW29`).
+
 ## [3.4.5] - 2026-11-11
 
 ### Fixed
